@@ -26,6 +26,7 @@ export interface GitStatusEntry {
 export interface GitStatusResult {
   isRepo: boolean
   branch?: string
+  ahead: number
   entries: GitStatusEntry[]
 }
 
@@ -182,12 +183,23 @@ export async function currentBranch(cwd: string): Promise<string> {
 /** Working-tree status (untracked included). */
 export async function status(cwd: string): Promise<GitStatusResult> {
   const repo = await isGitRepo(cwd)
-  if (!repo) return { isRepo: false, entries: [] }
-  const [branch, raw] = await Promise.all([
+  if (!repo) return { isRepo: false, ahead: 0, entries: [] }
+  const [branch, raw, ahead] = await Promise.all([
     currentBranch(cwd).catch(() => 'HEAD'),
     runGit(cwd, ['status', '--porcelain=v1', '-z', '--untracked-files=normal']),
+    runGit(cwd, ['rev-list', '--count', '@{upstream}..HEAD']).then(value => Number(value.trim())).catch(() => 0),
   ])
-  return { isRepo: true, branch, entries: parsePorcelainZ(raw) }
+  return { isRepo: true, branch, ahead, entries: parsePorcelainZ(raw) }
+}
+
+/** Fetch the current remote, or every configured remote. */
+export async function fetchRemote(cwd: string, all = false): Promise<void> {
+  await runGit(cwd, ['fetch', ...(all ? ['--all'] : [])], 120_000)
+}
+
+/** Push the current branch to its configured upstream. */
+export async function push(cwd: string): Promise<void> {
+  await runGit(cwd, ['push'], 120_000)
 }
 
 /** Diff text of the worktree (unstaged) or the index (staged). */

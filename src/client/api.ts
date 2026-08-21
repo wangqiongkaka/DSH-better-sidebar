@@ -41,6 +41,7 @@ export interface GitStatusEntry {
 export interface GitStatusResult {
   isRepo: boolean
   branch?: string
+  ahead: number
   entries: GitStatusEntry[]
 }
 
@@ -163,6 +164,10 @@ export const api = {
     call<{ ok: true }>('git.unstage', scopePayload(scope, { ...(path !== undefined ? { path } : {}) })),
   gitCommit: (scope: SessionScope, message: string) =>
     call<{ ok: true }>('git.commit', scopePayload(scope, { message })),
+  gitFetch: (scope: SessionScope, all = false) =>
+    call<{ ok: true }>(all ? 'git.fetch-all' : 'git.fetch', scopePayload(scope, {})),
+  gitPush: (scope: SessionScope) =>
+    call<{ ok: true }>('git.push', scopePayload(scope, {})),
   gitBranch: (scope: SessionScope, signal?: AbortSignal) =>
     call<{ current: string; names: string[] }>('git.branch', scopePayload(scope, {}), signal),
   gitCheckout: (scope: SessionScope, branch: string) =>

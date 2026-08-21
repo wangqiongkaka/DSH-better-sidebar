@@ -311,6 +311,21 @@ function buildApi(
       await git.commit(cwd, message)
       return { ok: true }
     },
+    'git.fetch': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      await git.fetchRemote(cwd)
+      return { ok: true }
+    },
+    'git.fetch-all': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      await git.fetchRemote(cwd, true)
+      return { ok: true }
+    },
+    'git.push': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      await git.push(cwd)
+      return { ok: true }
+    },
     'git.branch': async (payload) => {
       const { cwd } = cwdOf(payload)
       return git.branches(cwd)

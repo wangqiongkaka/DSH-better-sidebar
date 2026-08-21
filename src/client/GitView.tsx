@@ -241,6 +241,22 @@ export function GitView(props: {
     }
   }
 
+  const syncRemote = async (action: 'fetch' | 'fetch-all' | 'push'): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setCommitError(null)
+    try {
+      if (action === 'push') await api.gitPush(scope)
+      else await api.gitFetch(scope, action === 'fetch-all')
+      await refresh()
+    } catch (reason) {
+      const label = action === 'push' ? t('pushError') : t('fetchError')
+      setCommitError(`${label}: ${reason instanceof Error ? reason.message : String(reason)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const merge = async (branch: string): Promise<void> => {
     setBusy(true)
     setCommitError(null)
@@ -413,6 +429,10 @@ export function GitView(props: {
           open={branchMenuOpen}
           onClose={() => { setBranchMenuOpen(false) }}
           items={[
+            { id: 'fetch', label: t('fetch'), icon: <IconRefreshOutline16 size={14} /> },
+            { id: 'fetch-all', label: t('fetchAll'), icon: <IconRefreshOutline16 size={14} /> },
+            { id: 'push', label: t('pushBranch'), icon: <IconBranchOutline16 size={14} />, disabled: status?.branch === 'HEAD' },
+            { type: 'separator', id: 'remote-separator' },
             { id: 'merge', label: t('mergeBranch'), icon: <IconBranchOutline16 size={14} />, disabled: branchNames.every(name => name === status?.branch) },
             { id: 'rebase', label: t('rebaseBranch'), icon: <IconRefreshOutline16 size={14} />, disabled: branchNames.every(name => name === status?.branch) },
             { type: 'separator', id: 'branch-separator' },
@@ -421,6 +441,7 @@ export function GitView(props: {
           onSelect={(id) => {
             const branch = branchNames.find(name => name !== status?.branch) ?? null
             setBranchMenuOpen(false)
+            if (id === 'fetch' || id === 'fetch-all' || id === 'push') void syncRemote(id)
             if (id === 'merge') setMergeSource(branch)
             if (id === 'rebase') setRebaseTarget(branch)
             if (id === 'worktree') {
@@ -454,6 +475,13 @@ export function GitView(props: {
           <IconRefreshOutline16 size={14} />
         </button>
       </div>
+
+      {status?.isRepo === true && (status.entries.length > 0 || status.ahead > 0) && (
+        <div className={css.gitNotices}>
+          {status.entries.length > 0 && <div className={`${css.gitNotice} ${css.gitNoticeDirty}`}>{t('uncommittedReminder', { count: status.entries.length })}</div>}
+          {status.ahead > 0 && <div className={`${css.gitNotice} ${css.gitNoticeAhead}`}>{t('unpushedReminder', { count: status.ahead })}</div>}
+        </div>
+      )}
 
       {loading && <div className={css.gitPlaceholder}>{t('loading')}</div>}
       {!loading && error !== null && <div className={css.gitError}>{error}</div>}

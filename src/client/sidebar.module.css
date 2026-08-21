@@ -1777,6 +1777,28 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   font: var(--dsw-font-xxs-12);
 }
 
+.gitNotices {
+  display: grid;
+  gap: 4px;
+  padding: 4px 8px 8px;
+}
+
+.gitNotice {
+  padding: 6px 8px;
+  border-radius: 6px;
+  font: var(--dsw-font-xxs-12);
+}
+
+.gitNoticeDirty {
+  color: var(--dsw-alias-state-warn-label);
+  background: var(--dsw-alias-state-warn-tertiary);
+}
+
+.gitNoticeAhead {
+  color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
 .gitSection {
   border-top: 1px solid var(--dsw-alias-border-l1);
 }
