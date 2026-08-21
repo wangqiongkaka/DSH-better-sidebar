@@ -400,6 +400,11 @@ function buildApi(
       await git.discard(cwd, await resolveGitPath(cwd, requireString(payload, 'path')))
       return { ok: true }
     },
+    'git.discard-all': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      await git.discardAll(cwd)
+      return { ok: true }
+    },
     'git.revert': async (payload) => {
       const { cwd } = cwdOf(payload)
       await git.revert(cwd, requireString(payload, 'hash'))

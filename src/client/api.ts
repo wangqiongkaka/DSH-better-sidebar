@@ -202,6 +202,9 @@ export const api = {
   /** Discard the worktree changes of one file (the index is untouched). */
   gitDiscard: (scope: SessionScope, path: string) =>
     call<{ ok: true }>('git.discard', scopePayload(scope, { path })),
+  /** Restore all tracked files to HEAD and unstage additions without deleting them. */
+  gitDiscardAll: (scope: SessionScope) =>
+    call<{ ok: true }>('git.discard-all', scopePayload(scope, {})),
   /** Revert one commit onto the current branch. */
   gitRevert: (scope: SessionScope, hash: string) =>
     call<{ ok: true }>('git.revert', scopePayload(scope, { hash })),

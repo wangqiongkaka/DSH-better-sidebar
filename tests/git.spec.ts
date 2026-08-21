@@ -1,7 +1,11 @@
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import { parseUnifiedDiff } from '../src/client/DiffView.tsx'
 import { defaultWorktreeDraft } from '../src/client/GitView.tsx'
-import { parseLogLines, parsePorcelainZ } from '../src/git.ts'
+import { discardAll, parseLogLines, parsePorcelainZ, status } from '../src/git.ts'
 
 describe('git worktree defaults', () => {
   it('creates a new branch draft based on the current branch', () => {
@@ -148,5 +152,57 @@ describe('git parsing', () => {
   it('parses an empty or junk diff into no files', () => {
     expect(parseUnifiedDiff('').files).toEqual([])
     expect(parseUnifiedDiff('no diff here\n').files).toEqual([])
+  })
+})
+
+describe('discard all changes', () => {
+  const gitRun = (cwd: string, args: string[]): string => {
+    const result = spawnSync('git', ['-C', cwd, ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'dsh-better-sidebar-test',
+        GIT_AUTHOR_EMAIL: 'test@dsh.invalid',
+        GIT_COMMITTER_NAME: 'dsh-better-sidebar-test',
+        GIT_COMMITTER_EMAIL: 'test@dsh.invalid',
+      },
+    })
+    if (result.status !== 0) throw new Error(result.stderr || `git ${args[0] ?? ''} failed`)
+    return result.stdout
+  }
+
+  it('restores tracked files from a nested cwd while preserving untracked files', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-sidebar-discard-all-'))
+    try {
+      gitRun(dir, ['init', '-q'])
+      gitRun(dir, ['checkout', '-q', '-b', 'main'])
+      mkdirSync(join(dir, 'nested'))
+      writeFileSync(join(dir, 'a.txt'), 'original a\n')
+      writeFileSync(join(dir, 'nested', 'b.txt'), 'original b\n')
+      gitRun(dir, ['add', '-A'])
+      gitRun(dir, ['commit', '-q', '-m', 'base'])
+
+      writeFileSync(join(dir, 'a.txt'), 'staged a\n')
+      gitRun(dir, ['add', 'a.txt'])
+      writeFileSync(join(dir, 'a.txt'), 'worktree a\n')
+      rmSync(join(dir, 'nested', 'b.txt'))
+      writeFileSync(join(dir, 'staged-new.txt'), 'keep staged addition\n')
+      gitRun(dir, ['add', 'staged-new.txt'])
+      writeFileSync(join(dir, 'loose.txt'), 'keep untracked\n')
+
+      await discardAll(join(dir, 'nested'))
+
+      expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('original a\n')
+      expect(readFileSync(join(dir, 'nested', 'b.txt'), 'utf8')).toBe('original b\n')
+      expect(readFileSync(join(dir, 'staged-new.txt'), 'utf8')).toBe('keep staged addition\n')
+      expect(readFileSync(join(dir, 'loose.txt'), 'utf8')).toBe('keep untracked\n')
+      expect(existsSync(join(dir, 'staged-new.txt'))).toBe(true)
+      expect((await status(dir)).entries).toEqual([
+        { path: 'loose.txt', xy: '??' },
+        { path: 'staged-new.txt', xy: '??' },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

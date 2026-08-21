@@ -1821,10 +1821,47 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 6px 12px 4px;
   font: var(--dsw-font-xxxs-strong-11);
   color: var(--dsw-alias-label-tertiary);
   text-transform: uppercase;
+}
+
+.gitSectionToggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.gitSectionChevron,
+.gitSectionChevronExpanded {
+  flex: none;
+  transition: transform 120ms var(--ds-ease-in-out);
+}
+
+.gitSectionChevronExpanded {
+  transform: rotate(90deg);
+}
+
+.gitChangesActions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px 6px;
+}
+
+.gitDangerLink {
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .gitLink {
@@ -2396,6 +2433,7 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
 .explorerRow:focus-visible,
 .explorerRef:focus-visible,
 .gitRowMain:focus-visible,
+.gitSectionToggle:focus-visible,
 .gitLink:focus-visible,
 .gitCommitButton:focus-visible,
 .gitLogRow:focus-visible,
@@ -2424,6 +2462,8 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   .paneCard,
   .explorerRow,
   .gitRow,
+  .gitSectionChevron,
+  .gitSectionChevronExpanded,
   .divider,
   .dividerRow::after,
   .dividerCol::after {
