@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { parseUnifiedDiff } from '../src/client/DiffView.tsx'
+import { defaultWorktreeDraft } from '../src/client/GitView.tsx'
 import { parseLogLines, parsePorcelainZ } from '../src/git.ts'
+
+describe('git worktree defaults', () => {
+  it('creates a new branch draft based on the current branch', () => {
+    expect(defaultWorktreeDraft('feat/current', '/repo-worktrees/')).toEqual({
+      createNew: true,
+      newBranch: '',
+      base: 'feat/current',
+      path: '/repo-worktrees/new-branch',
+    })
+  })
+
+  it('uses HEAD as the base for a detached checkout', () => {
+    expect(defaultWorktreeDraft('HEAD', '/repo-worktrees/').base).toBe('HEAD')
+  })
+})
 
 describe('git parsing', () => {
   it('parses porcelain -z entries including renames', () => {

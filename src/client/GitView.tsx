@@ -79,6 +79,18 @@ interface ConfirmState {
  *  floods the panel at once (the end of the log is reached by paging). */
 const LOG_BATCH = 20
 
+/** Start a worktree draft on a new branch based on the current branch. */
+export function defaultWorktreeDraft(currentBranch: string, pathPrefix: string) {
+  return {
+    createNew: true,
+    newBranch: '',
+    base: currentBranch,
+    path: `${pathPrefix}new-branch`,
+  } as const
+}
+
+const INITIAL_WORKTREE_DRAFT = defaultWorktreeDraft('', '')
+
 export function GitView(props: {
   scope: SessionScope
   onOpenFile: (path: string) => void
@@ -104,9 +116,11 @@ export function GitView(props: {
   const [worktreeBranch, setWorktreeBranch] = useState('')
   const [worktreePath, setWorktreePath] = useState('')
   const [worktreePathPrefix, setWorktreePathPrefix] = useState('')
-  const [worktreeCreateNew, setWorktreeCreateNew] = useState(false)
-  const [worktreeNewBranch, setWorktreeNewBranch] = useState('')
-  const [worktreeBase, setWorktreeBase] = useState('')
+  // A checked-out branch cannot be attached to a second worktree, so the draft
+  // creates a new branch and uses the current branch as its base.
+  const [worktreeCreateNew, setWorktreeCreateNew] = useState<boolean>(INITIAL_WORKTREE_DRAFT.createNew)
+  const [worktreeNewBranch, setWorktreeNewBranch] = useState<string>(INITIAL_WORKTREE_DRAFT.newBranch)
+  const [worktreeBase, setWorktreeBase] = useState(INITIAL_WORKTREE_DRAFT.base)
   const [worktreeError, setWorktreeError] = useState<string | null>(null)
   const [worktreeMerge, setWorktreeMerge] = useState<GitWorktree | null>(null)
   const [worktreeTarget, setWorktreeTarget] = useState('')
@@ -445,7 +459,12 @@ export function GitView(props: {
             if (id === 'merge') setMergeSource(branch)
             if (id === 'rebase') setRebaseTarget(branch)
             if (id === 'worktree') {
+              const draft = defaultWorktreeDraft(status?.branch ?? '', worktreePathPrefix)
               setWorktreeError(null)
+              setWorktreeCreateNew(draft.createNew)
+              setWorktreeNewBranch(draft.newBranch)
+              setWorktreeBase(draft.base)
+              setWorktreePath(draft.path)
               setWorktreeOpen(true)
             }
           }}
@@ -846,6 +865,7 @@ export function GitView(props: {
                 }}
               />
               <select className={css.gitBranchSelect} aria-label={t('worktreeBase')} value={worktreeBase} disabled={busy} onChange={(event) => { setWorktreeBase(event.target.value) }}>
+                {worktreeBase !== '' && !branchNames.includes(worktreeBase) && <option value={worktreeBase}>{worktreeBase}</option>}
                 {branchNames.map(name => <option key={name} value={name}>{name}</option>)}
               </select>
             </>
