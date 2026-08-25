@@ -1,9 +1,9 @@
 schema: comet.native.v4
 name: git-stash-pop
 language: zh-CN
-phase: verify
-status: await-user
-state_version: 10
+phase: archive
+status: done
+state_version: 12
 brief: brief.md
 spec_changes:
   - capability: git-changes-panel
@@ -15,7 +15,7 @@ workspace:
   target_branch: yy-main
   finish: null
 loop:
-  stage: await-user
+  stage: done
   goal_cycle: 2
   iteration: 1
   attempt: 1
@@ -24,7 +24,7 @@ loop:
   no_progress_count: 0
   execution_failure_count: 0
   previous_unresolved_ids: []
-  next_action: confirm-skill-coordinated-pass
+  next_action: null
 acceptance:
   - id: A1
     source: brief.md
@@ -508,14 +508,7 @@ builder_handoff:
       truncated: false
   known_limits_truncated: false
   submitted_at: 2026-08-25T06:45:10.388Z
-blockers:
-  - owner: user
-    reason:
-      text: The generic Skill bridge cannot prove an independent Verifier execution;
-        user confirmation is required before Archive.
-      truncated: false
-    acceptance_ids: []
-    resolution_action: await-user
+blockers: []
 verification:
   candidate_id: fa3b76ce-401d-457e-89c9-655bb5603965
   identity_provider: skill-coordinated
@@ -603,5 +596,5 @@ history_overflow:
     recovery: 0
 verification_result: pass
 verification_report: verification.md
-archived: false
+archived: true
 created_at: 2026-08-25T03:57:05.008Z
