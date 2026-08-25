@@ -91,6 +91,15 @@ export function mediaTypeForPath(path: string): string {
   return MEDIA_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'
 }
 
+/** Narrow a stash ref to the `stash@{n}` shape git itself prints — the ref
+ *  reaches the host over the wire, and an arbitrary string would let a caller
+ *  smuggle an option (`--all`) into the git argv. */
+function requireStashRef(payload: unknown): string {
+  const ref = requireString(payload, 'ref')
+  if (!/^stash@\{\d+\}$/.test(ref)) throw new SidebarError('bad-request', 'invalid stash ref')
+  return ref
+}
+
 function requireGitOperation(payload: unknown): git.GitOperation {
   const operation = requireString(payload, 'operation')
   if (operation !== 'merge' && operation !== 'rebase') throw new SidebarError('bad-request', 'invalid git operation')
@@ -303,6 +312,30 @@ function buildApi(
       const record = payload as { path?: unknown }
       const path = record.path === undefined ? undefined : requireString(payload, 'path')
       await git.unstage(cwd, path)
+      return { ok: true }
+    },
+    'git.stash': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      await git.stash(cwd)
+      return { ok: true }
+    },
+    'git.stash-list': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      return { entries: await git.stashList(cwd) }
+    },
+    'git.stash-pop': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      await git.stashPop(cwd, requireStashRef(payload))
+      return { ok: true }
+    },
+    'git.stash-apply': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      await git.stashApply(cwd, requireStashRef(payload))
+      return { ok: true }
+    },
+    'git.stash-drop': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      await git.stashDrop(cwd, requireStashRef(payload))
       return { ok: true }
     },
     'git.commit': async (payload) => {

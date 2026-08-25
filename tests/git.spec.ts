@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import { parseUnifiedDiff } from '../src/client/DiffView.tsx'
 import { defaultWorktreeDraft } from '../src/client/GitView.tsx'
-import { discardAll, parseLogLines, parsePorcelainZ, status } from '../src/git.ts'
+import { discardAll, parseLogLines, parsePorcelainZ, stash, stashList, stashPop, status } from '../src/git.ts'
 
 describe('git worktree defaults', () => {
   it('creates a new branch draft based on the current branch', () => {
@@ -201,6 +201,59 @@ describe('discard all changes', () => {
         { path: 'loose.txt', xy: '??' },
         { path: 'staged-new.txt', xy: '??' },
       ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('stash stack', () => {
+  const gitRun = (cwd: string, args: string[]): string => {
+    const result = spawnSync('git', ['-C', cwd, ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'dsh-better-sidebar-test',
+        GIT_AUTHOR_EMAIL: 'test@dsh.invalid',
+        GIT_COMMITTER_NAME: 'dsh-better-sidebar-test',
+        GIT_COMMITTER_EMAIL: 'test@dsh.invalid',
+      },
+    })
+    if (result.status !== 0) throw new Error(result.stderr || `git ${args[0] ?? ''} failed`)
+    return result.stdout
+  }
+
+  // WHY: the panel's three change groups must all clear on Stash and all come
+  // back on Pop — an untracked file left behind reads as "the button did
+  // nothing", which is exactly what --include-untracked prevents.
+  it('stashes tracked and untracked changes together and restores them on pop', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-sidebar-stash-'))
+    try {
+      gitRun(dir, ['init', '-q'])
+      gitRun(dir, ['checkout', '-q', '-b', 'main'])
+      writeFileSync(join(dir, 'a.txt'), 'original a\n')
+      gitRun(dir, ['add', '-A'])
+      gitRun(dir, ['commit', '-q', '-m', 'base'])
+
+      expect(await stashList(dir)).toEqual([])
+
+      writeFileSync(join(dir, 'a.txt'), 'changed a\n')
+      writeFileSync(join(dir, 'loose.txt'), 'untracked\n')
+      await stash(dir)
+
+      expect((await status(dir)).entries).toEqual([])
+      expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('original a\n')
+      expect(existsSync(join(dir, 'loose.txt'))).toBe(false)
+
+      const entries = await stashList(dir)
+      expect(entries).toHaveLength(1)
+      expect(entries[0]!.ref).toBe('stash@{0}')
+      expect(entries[0]!.message).toContain('main')
+
+      await stashPop(dir, 'stash@{0}')
+      expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('changed a\n')
+      expect(readFileSync(join(dir, 'loose.txt'), 'utf8')).toBe('untracked\n')
+      expect(await stashList(dir)).toEqual([])
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

@@ -1,6 +1,7 @@
 /**
  * The source-control panel: status list (staged vs unstaged), stage/unstage,
- * commit with a message box, branch switch, and a VSCode-like history — rows
+ * the stash stack (save / pop / apply / drop), commit with a message box,
+ * branch switch, and a VSCode-like history — rows
  * carry branch decorations, author and relative time. Clicking a changed
  * file or a history row opens a dedicated diff TAB (see {@link DiffTab}),
  * placed below the git pane on first use. File rows and history rows open a
@@ -13,7 +14,7 @@ import {
   Button, IconBranchOutline16, IconChevronRightOutline14, IconCodeOutline16, IconCopyOutline16, IconRefreshOutline16,
   IconTrashOutline16, Input, Menu, Modal, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { GitLogEntry, GitOperation, GitStatusEntry, GitStatusResult, GitWorktree, SessionScope } from './api.ts'
+import type { GitLogEntry, GitOperation, GitStashEntry, GitStatusEntry, GitStatusResult, GitWorktree, SessionScope } from './api.ts'
 import { api } from './api.ts'
 import { relativeTo } from './paths.ts'
 import { relativeTime, t } from './locales.ts'
@@ -105,6 +106,7 @@ export function GitView(props: {
   const [error, setError] = useState<string | null>(null)
   const [branchNames, setBranchNames] = useState<string[]>([])
   const [logEntries, setLogEntries] = useState<GitLogEntry[]>([])
+  const [stashEntries, setStashEntries] = useState<GitStashEntry[]>([])
   const [commitMsg, setCommitMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [commitError, setCommitError] = useState<string | null>(null)
@@ -131,24 +133,29 @@ export function GitView(props: {
 
   /** The open file-row context menu (cursor position for the portaled Menu). */
   const [fileMenu, setFileMenu] = useState<{ entry: GitStatusEntry; staged: boolean; x: number; y: number } | null>(null)
+  /** The open stash-row context menu. */
+  const [stashMenu, setStashMenu] = useState<{ entry: GitStashEntry; x: number; y: number } | null>(null)
+  /** The last failed stash operation, shown inside the stash section itself. */
+  const [stashError, setStashError] = useState<string | null>(null)
   /** The open history-row context menu. */
   const [historyMenu, setHistoryMenu] = useState<{ entry: GitLogEntry; x: number; y: number } | null>(null)
   /** The pending destructive action awaiting confirmation. */
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
   /** Change-group folding is intentionally local to this mounted Git view. */
-  const [expandedSections, setExpandedSections] = useState({ staged: true, unstaged: true, untracked: true })
+  const [expandedSections, setExpandedSections] = useState({ staged: true, unstaged: true, untracked: true, stash: true })
 
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true)
     setError(null)
     try {
-      const [statusResult, branchResult, logResult, worktreeResult, operationResult] = await Promise.all([
+      const [statusResult, branchResult, logResult, worktreeResult, operationResult, stashResult] = await Promise.all([
         api.gitStatus(scope),
         api.gitBranch(scope).catch(() => ({ current: '', names: [] as string[] })),
         // The first history page only; the rest arrives via "load more".
         api.gitLog(scope, LOG_BATCH, 0).catch(() => [] as GitLogEntry[]),
         api.gitWorktrees(scope).catch(() => ({ entries: [] as GitWorktree[], pathPrefix: '' })),
         api.gitOperation(scope).catch(() => ({ operation: null })),
+        api.gitStashList(scope).catch(() => ({ entries: [] as GitStashEntry[] })),
       ])
       setStatus(statusResult)
       setBranchNames(branchResult.names)
@@ -157,6 +164,7 @@ export function GitView(props: {
       setWorktrees(worktreeResult.entries)
       setWorktreePathPrefix(worktreeResult.pathPrefix)
       setOperation(operationResult.operation)
+      setStashEntries(stashResult.entries)
       const available = branchResult.names.filter(name => !worktreeResult.entries.some(entry => entry.branch === name))
       setWorktreeBranch(branch => available.includes(branch) ? branch : available[0] ?? '')
       setWorktreeBase(base => branchResult.names.includes(base) ? base : branchResult.current)
@@ -236,6 +244,20 @@ export function GitView(props: {
       await refresh()
     } catch (reason) {
       setCommitError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Run one stash operation, then refresh; failures surface like a failed commit. */
+  const runStashAction = async (action: () => Promise<unknown>): Promise<void> => {
+    setBusy(true)
+    setStashError(null)
+    try {
+      await action()
+      await refresh()
+    } catch (reason) {
+      setStashError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setBusy(false)
     }
@@ -381,15 +403,15 @@ export function GitView(props: {
   }
 
   /** Run one destructive operation after the confirm modal, then refresh. */
-  const runConfirmed = (confirmState: ConfirmState): void => {
+  const runConfirmed = (confirmState: ConfirmState, reportError = setCommitError): void => {
     setConfirm({ ...confirmState, onConfirm: async () => {
       setBusy(true)
-      setCommitError(null)
+      reportError(null)
       try {
         await confirmState.onConfirm()
         await refresh()
       } catch (reason) {
-        setCommitError(reason instanceof Error ? reason.message : String(reason))
+        reportError(reason instanceof Error ? reason.message : String(reason))
       } finally {
         setBusy(false)
       }
@@ -407,6 +429,14 @@ export function GitView(props: {
     setFileMenu({ entry, staged, x: event.clientX, y: event.clientY })
   }
 
+  /** The stash-row menu opens on left OR right click: a right-click-only menu
+   *  on a fresh section is not discoverable, and the row has no other action. */
+  const openStashMenu = (event: MouseEvent, entry: GitStashEntry): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    setStashMenu({ entry, x: event.clientX, y: event.clientY })
+  }
+
   const openHistoryMenu = (event: MouseEvent, entry: GitLogEntry): void => {
     event.preventDefault()
     event.stopPropagation()
@@ -416,6 +446,8 @@ export function GitView(props: {
   const stagedEntries = (status?.entries ?? []).filter(isStagedEntry)
   const unstagedEntries = (status?.entries ?? []).filter(entry => isUnstagedEntry(entry) && !isUntracked(entry))
   const untrackedEntries = (status?.entries ?? []).filter(isUntracked)
+  /** Whether there is anything to stash at all (the three change groups). */
+  const changedCount = stagedEntries.length + unstagedEntries.length + untrackedEntries.length
   const discardableCount = new Set((status?.entries ?? []).filter(entry => !isUntracked(entry)).map(entry => entry.path)).size
 
   const toggleSection = (section: keyof typeof expandedSections): void => {
@@ -617,6 +649,43 @@ export function GitView(props: {
             )}
           </div>
 
+          <div className={css.gitSection}>
+            <div className={css.gitSectionHeader}>
+              <button type="button" className={css.gitSectionToggle} aria-expanded={expandedSections.stash} aria-controls="git-stash-entries" onClick={() => { toggleSection('stash') }}>
+                <IconChevronRightOutline14 className={expandedSections.stash ? css.gitSectionChevronExpanded : css.gitSectionChevron} />
+                <span>{t('stash')} ({stashEntries.length})</span>
+              </button>
+              <button
+                type="button"
+                className={css.gitLink}
+                disabled={busy || changedCount === 0}
+                onClick={() => { void runStashAction(() => api.gitStash(scope)) }}
+              >
+                {t('stashSave')}
+              </button>
+            </div>
+            {stashError !== null && <div className={css.gitError}>{stashError}</div>}
+            {expandedSections.stash && (
+              <div id="git-stash-entries">
+                {stashEntries.length === 0 && <div className={css.gitEmpty}>{t('noChanges')}</div>}
+                {stashEntries.map(entry => (
+                  <div key={entry.ref} className={css.gitRow}>
+                    <button
+                      type="button"
+                      className={css.gitRowMain}
+                      title={`${entry.ref}  ${entry.message}`}
+                      onClick={(event) => { openStashMenu(event, entry) }}
+                      onContextMenu={(event) => { openStashMenu(event, entry) }}
+                    >
+                      <span className={css.gitLogHash}>{entry.ref}</span>
+                      <span className={css.gitName}>{entry.message}</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className={css.gitCommit}>
             <Input
               className={css.gitCommitInput}
@@ -730,6 +799,43 @@ export function GitView(props: {
             portal
             align="start"
             getAnchorRect={() => (fileMenu === null ? null : new DOMRect(fileMenu.x, fileMenu.y, 0, 0))}
+            anchor={<span />}
+          />
+
+          {/* The shared stash-row context menu. */}
+          <Menu
+            open={stashMenu !== null}
+            onClose={() => { setStashMenu(null) }}
+            items={[
+              { id: 'pop', label: t('stashPop') },
+              { id: 'apply', label: t('stashApply') },
+              { type: 'separator', id: 'sep3' },
+              { id: 'drop', label: t('stashDrop'), icon: <IconTrashOutline16 size={14} />, danger: true },
+            ]}
+            onSelect={(id) => {
+              const target = stashMenu
+              if (target === null) return
+              setStashMenu(null)
+              if (id === 'pop') {
+                void runStashAction(() => api.gitStashPop(scope, target.entry.ref))
+                return
+              }
+              if (id === 'apply') {
+                void runStashAction(() => api.gitStashApply(scope, target.entry.ref))
+                return
+              }
+              if (id === 'drop') {
+                runConfirmed({
+                  title: t('stashDropTitle'),
+                  description: t('stashDropDesc', { ref: target.entry.ref }),
+                  confirmLabel: t('stashDrop'),
+                  onConfirm: () => api.gitStashDrop(scope, target.entry.ref),
+                }, setStashError)
+              }
+            }}
+            portal
+            align="start"
+            getAnchorRect={() => (stashMenu === null ? null : new DOMRect(stashMenu.x, stashMenu.y, 0, 0))}
             anchor={<span />}
           />
 

@@ -45,6 +45,14 @@ export interface GitStatusResult {
   entries: GitStatusEntry[]
 }
 
+/** One stash stack row (host git shape). */
+export interface GitStashEntry {
+  /** Stack ref, e.g. 'stash@{0}'. */
+  ref: string
+  /** Subject line, e.g. 'WIP on main: 1a2b3c4 subject'. */
+  message: string
+}
+
 /** One git log row. */
 export interface GitLogEntry {
   /** Short hash (7+ chars, display). */
@@ -162,6 +170,16 @@ export const api = {
     call<{ ok: true }>('git.stage', scopePayload(scope, { ...(path !== undefined ? { path } : {}) })),
   gitUnstage: (scope: SessionScope, path?: string) =>
     call<{ ok: true }>('git.unstage', scopePayload(scope, { ...(path !== undefined ? { path } : {}) })),
+  gitStash: (scope: SessionScope) =>
+    call<{ ok: true }>('git.stash', scopePayload(scope, {})),
+  gitStashList: (scope: SessionScope, signal?: AbortSignal) =>
+    call<{ entries: GitStashEntry[] }>('git.stash-list', scopePayload(scope, {}), signal),
+  gitStashPop: (scope: SessionScope, ref: string) =>
+    call<{ ok: true }>('git.stash-pop', scopePayload(scope, { ref })),
+  gitStashApply: (scope: SessionScope, ref: string) =>
+    call<{ ok: true }>('git.stash-apply', scopePayload(scope, { ref })),
+  gitStashDrop: (scope: SessionScope, ref: string) =>
+    call<{ ok: true }>('git.stash-drop', scopePayload(scope, { ref })),
   gitCommit: (scope: SessionScope, message: string) =>
     call<{ ok: true }>('git.commit', scopePayload(scope, { message })),
   gitFetch: (scope: SessionScope, all = false) =>

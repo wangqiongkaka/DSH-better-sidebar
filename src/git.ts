@@ -54,6 +54,14 @@ export interface GitWorktree {
   prunable: boolean
 }
 
+/** One `git stash list` row. */
+export interface GitStashEntry {
+  /** Stack ref, e.g. 'stash@{0}'. */
+  ref: string
+  /** Subject line, e.g. 'WIP on main: 1a2b3c4 subject'. */
+  message: string
+}
+
 /** One git failure (stderr text as the message). */
 export class GitCommandError extends Error {
   constructor(
@@ -218,6 +226,39 @@ export async function stage(cwd: string, path: string | undefined): Promise<void
 /** Unstage paths (all when path is undefined). */
 export async function unstage(cwd: string, path: string | undefined): Promise<void> {
   await runGit(cwd, ['reset', '-q', ...(path !== undefined ? ['--', path] : [])])
+}
+
+/**
+ * Push every change onto the stash stack. Untracked files are included so the
+ * panel's three change groups all clear together — leaving them behind makes
+ * the button look like it did nothing.
+ */
+export async function stash(cwd: string): Promise<void> {
+  await runGit(cwd, ['stash', 'push', '--include-untracked'])
+}
+
+/** The stash stack, newest (stash@{0}) first; [] when empty. */
+export async function stashList(cwd: string): Promise<GitStashEntry[]> {
+  const raw = await runGit(cwd, ['stash', 'list', '-z', '--format=%gd%x1f%s'])
+  return raw.split('\0').filter(row => row !== '').map((row) => {
+    const [ref, message] = row.split('\x1f')
+    return { ref: ref ?? '', message: message ?? '' }
+  })
+}
+
+/** Restore one stash entry and remove it from the stack. */
+export async function stashPop(cwd: string, ref: string): Promise<void> {
+  await runGit(cwd, ['stash', 'pop', ref])
+}
+
+/** Restore one stash entry, keeping it on the stack. */
+export async function stashApply(cwd: string, ref: string): Promise<void> {
+  await runGit(cwd, ['stash', 'apply', ref])
+}
+
+/** Discard one stash entry (not recoverable). */
+export async function stashDrop(cwd: string, ref: string): Promise<void> {
+  await runGit(cwd, ['stash', 'drop', ref])
 }
 
 /** Commit the staged changes with a message (global identity untouched). */
