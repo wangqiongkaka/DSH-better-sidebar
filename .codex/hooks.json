@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/wangqiongkaka/AIProjetcs/dsh-plugin/DSH-better-sidebar/.agents/skills/comet/scripts/comet-hook-router.mjs\" --platform \"codex\" --project-root \"/Users/wangqiongkaka/AIProjetcs/dsh-plugin/DSH-better-sidebar\""
+          }
+        ]
+      }
+    ]
+  }
+}

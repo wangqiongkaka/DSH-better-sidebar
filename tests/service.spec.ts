@@ -470,13 +470,13 @@ describe('service.openTab across the two panels', () => {
   it('openTab lands in the bottom tree when the active pane lives there', () => {
     const store = createSidebarStore()
     const service = createBetterSidebarService(store)
-    service.registerTab({ id: 'git', title: 'Git', component: () => null })
+    service.registerTab({ id: 'notes', title: 'Notes', component: () => null })
     store.setSession('s1')
     store.reduce(s => ({ ...s, activePane: (s.bottomSplits as { id: string }).id }))
-    service.openTab({ type: 'git', title: 'Git' })
+    service.openTab({ type: 'notes', title: 'Notes' })
     const state = store.getSnapshot().state!
-    expect(allLeaves(state.bottomSplits).flatMap(l => l.tabs).some(t => t.type === 'git')).toBe(true)
-    expect(allLeaves(state.splits).flatMap(l => l.tabs).some(t => t.type === 'git')).toBe(false)
+    expect(allLeaves(state.bottomSplits).flatMap(l => l.tabs).some(t => t.type === 'notes')).toBe(true)
+    expect(allLeaves(state.splits).flatMap(l => l.tabs).some(t => t.type === 'notes')).toBe(false)
   })
 
   it('dedupeKey focuses an existing instance in the OTHER tree (single-instance across panels)', () => {
@@ -505,15 +505,15 @@ describe('service.openTab across the two panels', () => {
   it('closeTab by id closes a tab living in the bottom tree', () => {
     const store = createSidebarStore()
     const service = createBetterSidebarService(store)
-    service.registerTab({ id: 'git', title: 'Git', component: () => null })
+    service.registerTab({ id: 'notes', title: 'Notes', component: () => null })
     store.setSession('s1')
     store.reduce(s => ({ ...s, activePane: (s.bottomSplits as { id: string }).id }))
-    service.openTab({ type: 'git', title: 'Git' })
+    service.openTab({ type: 'notes', title: 'Notes' })
     const state = store.getSnapshot().state!
-    const gitTab = allLeaves(state.bottomSplits).flatMap(l => l.tabs).find(t => t.type === 'git')!
-    service.closeTab(gitTab.id)
+    const notesTab = allLeaves(state.bottomSplits).flatMap(l => l.tabs).find(t => t.type === 'notes')!
+    service.closeTab(notesTab.id)
     const after = store.getSnapshot().state!
-    expect(allLeaves(after.bottomSplits).flatMap(l => l.tabs).some(t => t.id === gitTab.id)).toBe(false)
+    expect(allLeaves(after.bottomSplits).flatMap(l => l.tabs).some(t => t.id === notesTab.id)).toBe(false)
   })
 })
 
@@ -715,8 +715,8 @@ describe('activateTab (v0.12.0)', () => {
     const service = createBetterSidebarService(store)
     const seen: Array<{ tab: string; sessionId: string }> = []
     service.registerTab({
-      id: 'git',
-      title: 'Git',
+      id: 'notes',
+      title: 'Notes',
       single: true,
       onActivate: (tab, scope) => { seen.push({ tab: tab.id, sessionId: scope.sessionId }) },
       component: () => null,
@@ -724,13 +724,13 @@ describe('activateTab (v0.12.0)', () => {
     store.setSession('s1')
     // Land in the bottom tree by switching the active pane.
     store.reduce(s => ({ ...s, activePane: (s.bottomSplits as { id: string }).id }))
-    service.openTab({ type: 'git', title: 'Git' })
-    const gitTab = allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(l => l.tabs).find(t => t.type === 'git')!
-    expect(gitTab).toBeDefined()
-    service.activateTab(gitTab.id)
-    expect(seen).toEqual([{ tab: gitTab.id, sessionId: 's1' }])
+    service.openTab({ type: 'notes', title: 'Notes' })
+    const notesTab = allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(l => l.tabs).find(t => t.type === 'notes')!
+    expect(notesTab).toBeDefined()
+    service.activateTab(notesTab.id)
+    expect(seen).toEqual([{ tab: notesTab.id, sessionId: 's1' }])
     // The active pane followed the tab into the bottom tree.
-    expect(store.getSnapshot().state!.activePane).toBe(gitTab.id === '' ? null : allLeaves(store.getSnapshot().state!.bottomSplits).find(l => l.tabs.some(t => t.id === gitTab.id))!.id)
+    expect(store.getSnapshot().state!.activePane).toBe(notesTab.id === '' ? null : allLeaves(store.getSnapshot().state!.bottomSplits).find(l => l.tabs.some(t => t.id === notesTab.id))!.id)
   })
 })
 

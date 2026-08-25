@@ -32,6 +32,9 @@ function setup(): {
   const service = createBetterSidebarService(store)
   // The openTab path needs a registered editor descriptor (dedupe by path).
   service.registerTab({ id: 'editor', title: 'Editor', dedupeKey: (tab) => tab.path, component: () => null })
+  // Disable the new Source Control default so this focused fixture exercises
+  // the editor-home fallback explicitly.
+  store.setPrefs({ ...store.getPrefs(), tabsEnabled: { git: false } })
   store.setSession('editor-home-session')
   const homeTab = (): SidebarTab =>
     allLeaves(store.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)

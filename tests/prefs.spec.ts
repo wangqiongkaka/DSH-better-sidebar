@@ -259,37 +259,27 @@ describe('side card preferences', () => {
     }
   })
 
-  it('skips the default seed tab when the editor (files window) type is disabled', () => {
+  it('seeds Source Control by default and falls back according to enabled tabs', () => {
     const store = createSidebarStore()
-    store.setPrefs({ openByDefault: true, defaultWidthPercent: 30, autoOpenSubagent: true, autoOpenJobs: true, agentTerminalTools: false, bottomPanelAutoTerminal: true, terminalFontFamily: '', terminalFontSize: 13, interceptOpenPath: true, editorExplorer: true, terminalShell: '', terminalShellArgs: '', titleBarCompat: false, titleBarStripPx: 40, htmlViewerNoSandbox: false, htmlViewerDefaultUnsafe: false, browserNoSandbox: false, browserInterceptLinks: true, browserInterceptHttp: true, browserInterceptHttps: false, tabsEnabled: { editor: false }, viewersEnabled: {}, pluginSettings: {} })
-    store.setSession('no-editor')
-    const state = store.getSnapshot().state!
-    const tabs = allLeaves(state.splits).flatMap(leaf => leaf.tabs)
-    expect(tabs).toHaveLength(0)
-    expect(state.splits.kind).toBe('leaf')
-    // Re-enabling seeds the files window (editor home tab) again — in BOTH
-    // editorExplorer modes.
-    for (const editorExplorer of [true, false]) {
-      const openStore = createSidebarStore()
-      openStore.setPrefs({ openByDefault: true, defaultWidthPercent: 30, autoOpenSubagent: true, autoOpenJobs: true, agentTerminalTools: false, bottomPanelAutoTerminal: true, terminalFontFamily: '', terminalFontSize: 13, interceptOpenPath: true, editorExplorer, terminalShell: '', terminalShellArgs: '', titleBarCompat: false, titleBarStripPx: 40, htmlViewerNoSandbox: false, htmlViewerDefaultUnsafe: false, browserNoSandbox: false, browserInterceptLinks: true, browserInterceptHttp: true, browserInterceptHttps: false, tabsEnabled: {}, viewersEnabled: {}, pluginSettings: {} })
-      openStore.setSession(`with-editor-${editorExplorer}`)
-      const openTabs = allLeaves(openStore.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)
-      expect(openTabs.map(tab => tab.type)).toEqual(['editor'])
-    }
-  })
+    store.setPrefs({ openByDefault: true, defaultWidthPercent: 30, autoOpenSubagent: true, autoOpenJobs: true, agentTerminalTools: false, bottomPanelAutoTerminal: true, terminalFontFamily: '', terminalFontSize: 13, interceptOpenPath: true, editorExplorer: true, terminalShell: '', terminalShellArgs: '', titleBarCompat: false, titleBarStripPx: 40, htmlViewerNoSandbox: false, htmlViewerDefaultUnsafe: false, browserNoSandbox: false, browserInterceptLinks: true, browserInterceptHttp: true, browserInterceptHttps: false, tabsEnabled: {}, viewersEnabled: {}, pluginSettings: {} })
+    store.setSession('default-source-control')
+    expect(allLeaves(store.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs).map(tab => tab.type)).toEqual(['git'])
 
-  it('seeds the empty editor home tab (files window) in both editorExplorer modes', () => {
+    // A disabled Git tab falls back to the files window.
     for (const editorExplorer of [true, false]) {
-      const store = createSidebarStore()
-      store.setPrefs({ openByDefault: true, defaultWidthPercent: 30, autoOpenSubagent: true, autoOpenJobs: true, agentTerminalTools: false, bottomPanelAutoTerminal: true, terminalFontFamily: '', terminalFontSize: 13, interceptOpenPath: true, editorExplorer, terminalShell: '', terminalShellArgs: '', titleBarCompat: false, titleBarStripPx: 40, htmlViewerNoSandbox: false, htmlViewerDefaultUnsafe: false, browserNoSandbox: false, browserInterceptLinks: true, browserInterceptHttp: true, browserInterceptHttps: false, tabsEnabled: {}, viewersEnabled: {}, pluginSettings: {} })
-      store.setSession(`fresh-${editorExplorer}`)
-      const tabs = allLeaves(store.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)
-      expect(tabs).toHaveLength(1)
-      expect(tabs[0]!.type).toBe('editor')
-      expect(tabs[0]!.title).toBe('Files')
-      expect(tabs[0]!.path).toBeUndefined()
-      expect(tabs[0]!.meta).toEqual({ treeOpen: true })
+      const fallbackStore = createSidebarStore()
+      fallbackStore.setPrefs({ openByDefault: true, defaultWidthPercent: 30, autoOpenSubagent: true, autoOpenJobs: true, agentTerminalTools: false, bottomPanelAutoTerminal: true, terminalFontFamily: '', terminalFontSize: 13, interceptOpenPath: true, editorExplorer, terminalShell: '', terminalShellArgs: '', titleBarCompat: false, titleBarStripPx: 40, htmlViewerNoSandbox: false, htmlViewerDefaultUnsafe: false, browserNoSandbox: false, browserInterceptLinks: true, browserInterceptHttp: true, browserInterceptHttps: false, tabsEnabled: { git: false }, viewersEnabled: {}, pluginSettings: {} })
+      fallbackStore.setSession(`git-disabled-${editorExplorer}`)
+      const fallbackTabs = allLeaves(fallbackStore.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)
+      expect(fallbackTabs).toHaveLength(1)
+      expect(fallbackTabs[0]).toMatchObject({ type: 'editor', title: 'Files', meta: { treeOpen: true } })
     }
+
+    // Disabling both possible seed tabs leaves the pane empty.
+    const emptyStore = createSidebarStore()
+    emptyStore.setPrefs({ openByDefault: true, defaultWidthPercent: 30, autoOpenSubagent: true, autoOpenJobs: true, agentTerminalTools: false, bottomPanelAutoTerminal: true, terminalFontFamily: '', terminalFontSize: 13, interceptOpenPath: true, editorExplorer: true, terminalShell: '', terminalShellArgs: '', titleBarCompat: false, titleBarStripPx: 40, htmlViewerNoSandbox: false, htmlViewerDefaultUnsafe: false, browserNoSandbox: false, browserInterceptLinks: true, browserInterceptHttp: true, browserInterceptHttps: false, tabsEnabled: { git: false, editor: false }, viewersEnabled: {}, pluginSettings: {} })
+    emptyStore.setSession('no-default-tabs')
+    expect(allLeaves(emptyStore.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)).toHaveLength(0)
   })
 
   it('derives the default width from the window percent with clamps', () => {

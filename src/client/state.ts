@@ -147,20 +147,22 @@ function maxCounterId(parsed: unknown): number {
 }
 
 /** The default tab a fresh session seeds. */
-export type DefaultSeed = 'editor-home' | 'none'
+export type DefaultSeed = 'source-control' | 'editor-home' | 'none'
 
 /** A fresh default state: one seeded tab in one pane, open per the caller's
  * preference. `width` is the caller's preferred panel width (default
  * PANEL_DEFAULT) and `panelOpen` whether the panel starts expanded (default
  * true); the store seeds new sessions from the user's side card prefs.
- * `seed` picks the seeded tab: 'editor-home' places the EMPTY files window
- * (an editor tab with no path whose tree panel starts open,
- * `meta.treeOpen: true`) — in BOTH editorExplorer modes that window is the
- * file explorer page — and 'none' starts with an empty pane (the store
- * passes it when the user disabled the editor tab type in settings). */
-export function makeDefaultState(width = PANEL_DEFAULT, panelOpen = true, seed: DefaultSeed = 'editor-home'): SidebarState {
+ * `seed` picks the seeded tab: 'source-control' opens Git, 'editor-home'
+ * places the EMPTY files window (an editor tab with no path whose tree panel
+ * starts open, `meta.treeOpen: true`) — in BOTH editorExplorer modes that
+ * window is the file explorer page — and 'none' starts with an empty pane. */
+export function makeDefaultState(width = PANEL_DEFAULT, panelOpen = true, seed: DefaultSeed = 'source-control'): SidebarState {
   const leaf: SidebarLeaf = { kind: 'leaf', id: uid('pane'), tabs: [], active: null }
-  if (seed === 'editor-home') {
+  if (seed === 'source-control') {
+    leaf.tabs = [{ id: 'git', type: 'git', title: 'Source Control' }]
+    leaf.active = leaf.tabs[0]!.id
+  } else if (seed === 'editor-home') {
     // No path: the editor host renders its empty-state hint and the docked
     // tree panel (treeOpen defaults open for path-less tabs; meta pins it).
     leaf.tabs = [{ id: uid('tab'), type: 'editor', title: 'Files', meta: { treeOpen: true } }]
@@ -778,9 +780,9 @@ function loadState(sessionId: string, prefs: SidebarPrefs): SidebarState {
   // New sessions seed from the user's side card prefs: the width is the
   // chosen percent of the window (clamped to the panel floor and the
   // viewport so a huge percent can never crush the app shell), the panel
-  // starts open only when the preference says so, and the seed tab is the
-  // empty files window (tree panel open) in BOTH editorExplorer modes — a
-  // disabled editor type seeds nothing. On a NARROW viewport a brand-new
+  // starts open only when the preference says so, and the seed tab is Source
+  // Control. When Git is disabled, the empty files window is the fallback;
+  // disabling both types seeds nothing. On a NARROW viewport a brand-new
   // session starts collapsed instead — the panel is a full-screen drawer
   // there, and auto-opening it on first paint would cover the conversation
   // before the user asked. Only the first seeding is affected: once the
@@ -791,7 +793,9 @@ function loadState(sessionId: string, prefs: SidebarPrefs): SidebarState {
     ? PANEL_DEFAULT
     : defaultWidthFor(viewport, prefs.defaultWidthPercent)
   const openByDefault = prefs.openByDefault && (viewport === undefined || !isNarrowWidth(viewport))
-  const seed: DefaultSeed = prefs.tabsEnabled['editor'] === false ? 'none' : 'editor-home'
+  const seed: DefaultSeed = prefs.tabsEnabled['git'] !== false
+    ? 'source-control'
+    : prefs.tabsEnabled['editor'] !== false ? 'editor-home' : 'none'
   return makeDefaultState(width, openByDefault, seed)
 }
 

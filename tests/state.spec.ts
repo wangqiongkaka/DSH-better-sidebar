@@ -10,20 +10,22 @@ import {
 describe('sidebar state', () => {
   const state = (): SidebarState => makeDefaultState()
 
-  it('makeDefaultState seeds per the seed enum (editor-home / none)', () => {
-    // Default and explicit 'editor-home' seed an EMPTY editor tab (the files
-    // window) with the tree panel pinned open.
-    for (const s of [makeDefaultState(), makeDefaultState(400, true, 'editor-home')]) {
+  it('makeDefaultState seeds per the seed enum (source-control / editor-home / none)', () => {
+    // Source Control is the default page for a fresh session.
+    for (const s of [makeDefaultState(), makeDefaultState(400, true, 'source-control')]) {
       const leaf = s.splits as { tabs: SidebarTab[]; active: string | null }
-      expect(leaf.tabs).toHaveLength(1)
-      expect(leaf.tabs[0]!.type).toBe('editor')
-      expect(leaf.tabs[0]!.title).toBe('Files')
-      expect(leaf.tabs[0]!.path).toBeUndefined()
-      expect(leaf.tabs[0]!.meta).toEqual({ treeOpen: true })
-      expect(leaf.active).toBe(leaf.tabs[0]!.id)
+      expect(leaf.tabs).toEqual([{ id: 'git', type: 'git', title: 'Source Control' }])
+      expect(leaf.active).toBe('git')
     }
-    // The seeded home tab survives the persist round-trip (meta intact).
-    const restored = sanitizeState(JSON.parse(JSON.stringify(makeDefaultState())))
+    // The explicit editor fallback remains an EMPTY files window with its
+    // tree panel pinned open and survives persistence with metadata intact.
+    const editor = makeDefaultState(400, true, 'editor-home')
+    const editorLeaf = editor.splits as { tabs: SidebarTab[]; active: string | null }
+    expect(editorLeaf.tabs).toHaveLength(1)
+    expect(editorLeaf.tabs[0]).toMatchObject({ type: 'editor', title: 'Files', meta: { treeOpen: true } })
+    expect(editorLeaf.tabs[0]!.path).toBeUndefined()
+    expect(editorLeaf.active).toBe(editorLeaf.tabs[0]!.id)
+    const restored = sanitizeState(JSON.parse(JSON.stringify(editor)))
     const restoredLeaf = restored!.splits as { tabs: SidebarTab[] }
     expect(restoredLeaf.tabs[0]!.meta).toEqual({ treeOpen: true })
     // 'none' seeds an empty pane.
@@ -65,15 +67,15 @@ describe('sidebar state', () => {
 
   it('opens tabs into the active pane and dedupes by id (safety net)', () => {
     let s = state()
-    const gitTab = { id: 'git', type: 'git' as const, title: 'Git' }
-    s = openTabInActivePane(s, gitTab)
+    const terminalTab = { id: 'terminal:1', type: 'terminal' as const, title: 'Terminal 1' }
+    s = openTabInActivePane(s, terminalTab)
     expect(s.splits.kind).toBe('leaf')
     expect((s.splits as { tabs: unknown[] }).tabs).toHaveLength(2)
     // Reopening with the SAME id focuses the existing tab instead of duplicating.
-    const after = openTabInActivePane(s, { id: 'git', type: 'git' as const, title: 'Git' })
+    const after = openTabInActivePane(s, terminalTab)
     expect((after.splits as { tabs: unknown[] }).tabs).toHaveLength(2)
     // A different id opens a new tab (type-level dedupe is the service's job).
-    const after2 = openTabInActivePane(s, { id: 'git2', type: 'git' as const, title: 'Git' })
+    const after2 = openTabInActivePane(s, { id: 'terminal:2', type: 'terminal' as const, title: 'Terminal 2' })
     expect((after2.splits as { tabs: unknown[] }).tabs).toHaveLength(3)
   })
 
@@ -431,7 +433,7 @@ describe('sidebar state', () => {
     const migrated = migrateBottomTabs(s)
     // All tabs now live in the right tree's first leaf, bottom tabs appended.
     expect((migrated.splits as { tabs: SidebarTab[] }).tabs.map(t => t.id))
-      .toEqual([expect.stringMatching(/^tab:/), 'terminal:1', 'terminal:2'])
+      .toEqual(['git', 'terminal:1', 'terminal:2'])
     // The bottom tree is emptied (structure stays), the panel closes, and
     // new tabs land in the right tree.
     expect((migrated.bottomSplits as { tabs: SidebarTab[] }).tabs).toHaveLength(0)
@@ -484,15 +486,15 @@ describe('sidebar state', () => {
     s = toggleBottomPanel(s)
     const bottomPane = (s.bottomSplits as { id: string }).id
     s = { ...s, activePane: bottomPane }
-    const tab = { id: 'git', type: 'git' as const, title: 'Git' }
+    const tab = { id: 'subagent', type: 'subagent' as const, title: 'Subagents' }
     s = openTabInActivePane(s, tab)
-    expect((s.bottomSplits as { tabs: SidebarTab[] }).tabs.map(t => t.id)).toContain('git')
-    // The right tree is untouched (its seeded files-window home tab stays).
-    expect((s.splits as { tabs: SidebarTab[] }).tabs.map(t => t.type)).toEqual(['editor'])
+    expect((s.bottomSplits as { tabs: SidebarTab[] }).tabs.map(t => t.id)).toContain('subagent')
+    // The right tree is untouched (its seeded Source Control tab stays).
+    expect((s.splits as { tabs: SidebarTab[] }).tabs.map(t => t.type)).toEqual(['git'])
     expect(s.activePane).toBe(bottomPane)
     // The id safety net works across trees: reopening the same id focuses it.
     const after = openTabInActivePane(s, tab)
-    expect((after.bottomSplits as { tabs: SidebarTab[] }).tabs.map(t => t.id)).toEqual(['git'])
+    expect((after.bottomSplits as { tabs: SidebarTab[] }).tabs.map(t => t.id)).toEqual(['subagent'])
   })
 
   it('openTabInActivePane falls back to the right tree when the active pane is stale', () => {
@@ -753,7 +755,7 @@ describe('persisted state sanitization', () => {
   it('falls back from a stale active pane instead of dropping the open', () => {
     let s = makeDefaultState()
     const paneA = allLeaves(s.splits)[0]!.id
-    const seededTab = allLeaves(s.splits)[0]!.tabs.find(tab => tab.type === 'editor')!.id
+    const seededTab = allLeaves(s.splits)[0]!.tabs[0]!.id
     s = closeTab(s, paneA, seededTab)
     s = openTabInActivePane(s, { id: 'editor:/a.ts', type: 'editor', title: 'a.ts', path: '/a.ts' })
     const split = insertLeafAt(s.splits, paneA, 'col', { id: 'terminal:1', type: 'terminal', title: 'Terminal 1' }, false)
