@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve as resolvePath } from 'node:path'
 import { SettingsConflictError, settingsNamespace } from '@deepseek-ai/dsh-settings'
-import { apply, mediaTypeForPath } from '../src/index.ts'
+import { apply, mediaTypeForPath, requireTagName } from '../src/index.ts'
 import * as git from '../src/git.ts'
 import { listDirectory } from '../src/fs-tree.ts'
 import { defaultShell, PtyManager, type SidebarPty } from '../src/pty-manager.ts'
@@ -61,6 +61,20 @@ describe('host plugin smoke', () => {
   it('serves PDF with the browser-native content type', () => {
     expect(mediaTypeForPath('/work/report.PDF')).toBe('application/pdf')
     expect(mediaTypeForPath('/work/archive.bin')).toBe('application/octet-stream')
+  })
+
+  // WHY: the tag name arrives over the wire and goes straight into the git
+  // argv. A leading `-` would turn it into a git option, and the rest of these
+  // are names git itself refuses — catching them here keeps the failure at the
+  // wire edge instead of surfacing as an opaque git error.
+  it('rejects tag names git itself would refuse', () => {
+    expect(requireTagName({ name: 'v1.2.0' })).toBe('v1.2.0')
+    expect(requireTagName({ name: 'release/2024.1' })).toBe('release/2024.1')
+    expect(requireTagName({ name: 'v1.0+build.5' })).toBe('v1.0+build.5')
+    expect(() => requireTagName({ name: '' })).toThrow(/missing or invalid/)
+    for (const name of ['-f', '--all', '.hidden', '/abs', 'a b', 'a~1', 'a^', 'a:b', 'a?', 'a*', 'a[0]', 'a\\b', 'a..b', 'a@{0}', 'a//b', 'a/', 'a.', 'a.lock']) {
+      expect(() => requireTagName({ name }), name).toThrow(/invalid tag name/)
+    }
   })
 
   it('mounts the fenced routes', () => {

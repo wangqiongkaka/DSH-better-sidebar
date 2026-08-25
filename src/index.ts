@@ -100,6 +100,29 @@ function requireStashRef(payload: unknown): string {
   return ref
 }
 
+/** Reject exactly what `git check-ref-format` rejects for a tag name. The name
+ *  reaches the host over the wire, so a leading `-` would otherwise be parsed
+ *  as a git option; the rest keeps the failure at the wire edge instead of as
+ *  an opaque git error. */
+export function requireTagName(payload: unknown): string {
+  const name = requireString(payload, 'name')
+  const invalid = /^[-./]/.test(name)
+    || /[\s~^:?*[\\\x00-\x1f\x7f]/.test(name)
+    || name.includes('..')
+    || name.includes('@{')
+    || name.includes('//')
+    || /(\/|\.|\.lock)$/.test(name)
+  if (invalid) throw new SidebarError('bad-request', 'invalid tag name')
+  return name
+}
+
+/** The full 40-char hash the history rows carry; anything else is a caller bug. */
+function requireCommitHash(payload: unknown, field: string): string {
+  const hash = requireString(payload, field)
+  if (!/^[0-9a-f]{40}$/.test(hash)) throw new SidebarError('bad-request', 'invalid commit hash')
+  return hash
+}
+
 function requireGitOperation(payload: unknown): git.GitOperation {
   const operation = requireString(payload, 'operation')
   if (operation !== 'merge' && operation !== 'rebase') throw new SidebarError('bad-request', 'invalid git operation')
@@ -336,6 +359,31 @@ function buildApi(
     'git.stash-drop': async (payload) => {
       const { cwd } = cwdOf(payload)
       await git.stashDrop(cwd, requireStashRef(payload))
+      return { ok: true }
+    },
+    'git.tag-list': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      return { entries: await git.tags(cwd) }
+    },
+    'git.tag-create': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      const record = payload as { message?: unknown; commit?: unknown }
+      await git.createTag(
+        cwd,
+        requireTagName(payload),
+        record.message === undefined ? undefined : requireString(payload, 'message'),
+        record.commit === undefined ? undefined : requireCommitHash(payload, 'commit'),
+      )
+      return { ok: true }
+    },
+    'git.tag-delete': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      await git.deleteTag(cwd, requireTagName(payload))
+      return { ok: true }
+    },
+    'git.tag-push': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      await git.pushTag(cwd, requireTagName(payload))
       return { ok: true }
     },
     'git.commit': async (payload) => {

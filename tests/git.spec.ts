@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import { parseUnifiedDiff } from '../src/client/DiffView.tsx'
 import { defaultWorktreeDraft } from '../src/client/GitView.tsx'
-import { discardAll, parseLogLines, parsePorcelainZ, stash, stashList, stashPop, status } from '../src/git.ts'
+import { createTag, deleteTag, discardAll, parseLogLines, parsePorcelainZ, stash, stashList, stashPop, status, tags } from '../src/git.ts'
 
 describe('git worktree defaults', () => {
   it('creates a new branch draft based on the current branch', () => {
@@ -254,6 +254,82 @@ describe('stash stack', () => {
       expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('changed a\n')
       expect(readFileSync(join(dir, 'loose.txt'), 'utf8')).toBe('untracked\n')
       expect(await stashList(dir)).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('tags', () => {
+  /** `date` pins both commit dates, so tags created in the same second still
+   *  have an unambiguous creation order to sort by. */
+  const gitRun = (cwd: string, args: string[], date?: string): string => {
+    const result = spawnSync('git', ['-C', cwd, ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'dsh-better-sidebar-test',
+        GIT_AUTHOR_EMAIL: 'test@dsh.invalid',
+        GIT_COMMITTER_NAME: 'dsh-better-sidebar-test',
+        GIT_COMMITTER_EMAIL: 'test@dsh.invalid',
+        ...(date === undefined ? {} : { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date }),
+      },
+    })
+    if (result.status !== 0) throw new Error(result.stderr || `git ${args[0] ?? ''} failed`)
+    return result.stdout
+  }
+
+  // WHY: the tag row is the only place the user reads what a tag means, and the
+  // two tag kinds carry that text in different places — an annotated tag in its
+  // own message, a lightweight one only in the commit it points at. Reading the
+  // wrong field would leave every lightweight tag with a blank row.
+  it('lists both tag kinds newest-first with the right subject, and drops a deleted one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-sidebar-tag-'))
+    try {
+      gitRun(dir, ['init', '-q'])
+      gitRun(dir, ['checkout', '-q', '-b', 'main'])
+      writeFileSync(join(dir, 'a.txt'), 'a\n')
+      gitRun(dir, ['add', '-A'])
+      gitRun(dir, ['commit', '-q', '-m', 'base commit'], '2020-01-01T00:00:00+0000')
+
+      expect(await tags(dir)).toEqual([])
+
+      // A lightweight tag inherits its commit's date (2020), while an annotated
+      // tag is stamped now — so v0.2.0 is unambiguously the newer of the two.
+      await createTag(dir, 'v0.1.0')
+      await createTag(dir, 'v0.2.0', 'second release')
+
+      expect(await tags(dir)).toEqual([
+        { name: 'v0.2.0', subject: 'second release' },
+        { name: 'v0.1.0', subject: 'base commit' },
+      ])
+
+      await deleteTag(dir, 'v0.2.0')
+      expect(await tags(dir)).toEqual([{ name: 'v0.1.0', subject: 'base commit' }])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  // WHY: the history menu's whole point is tagging a commit that is not HEAD;
+  // if the commit argument were dropped the tag would silently land on the
+  // latest commit instead of the one the user right-clicked.
+  it('tags the requested commit rather than HEAD', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-sidebar-tag-commit-'))
+    try {
+      gitRun(dir, ['init', '-q'])
+      gitRun(dir, ['checkout', '-q', '-b', 'main'])
+      writeFileSync(join(dir, 'a.txt'), 'a\n')
+      gitRun(dir, ['add', '-A'])
+      gitRun(dir, ['commit', '-q', '-m', 'older commit'])
+      const older = gitRun(dir, ['rev-parse', 'HEAD']).trim()
+      writeFileSync(join(dir, 'a.txt'), 'b\n')
+      gitRun(dir, ['commit', '-q', '-am', 'newer commit'])
+
+      await createTag(dir, 'on-older', '', older)
+
+      expect(gitRun(dir, ['rev-parse', 'on-older']).trim()).toBe(older)
+      expect(await tags(dir)).toEqual([{ name: 'on-older', subject: 'older commit' }])
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

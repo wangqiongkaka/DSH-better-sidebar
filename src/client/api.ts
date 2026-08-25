@@ -53,6 +53,14 @@ export interface GitStashEntry {
   message: string
 }
 
+/** One tag row (host git shape). */
+export interface GitTagEntry {
+  /** Tag name, e.g. 'v1.2.0'. */
+  name: string
+  /** Annotation subject for an annotated tag; the tagged commit's subject for a lightweight one. */
+  subject: string
+}
+
 /** One git log row. */
 export interface GitLogEntry {
   /** Short hash (7+ chars, display). */
@@ -180,6 +188,19 @@ export const api = {
     call<{ ok: true }>('git.stash-apply', scopePayload(scope, { ref })),
   gitStashDrop: (scope: SessionScope, ref: string) =>
     call<{ ok: true }>('git.stash-drop', scopePayload(scope, { ref })),
+  gitTags: (scope: SessionScope, signal?: AbortSignal) =>
+    call<{ entries: GitTagEntry[] }>('git.tag-list', scopePayload(scope, {}), signal),
+  /** Create a tag on `commit` (HEAD when omitted); a non-empty message makes it annotated. */
+  gitTagCreate: (scope: SessionScope, name: string, message?: string, commit?: string) =>
+    call<{ ok: true }>('git.tag-create', scopePayload(scope, {
+      name,
+      ...(message === undefined || message === '' ? {} : { message }),
+      ...(commit === undefined ? {} : { commit }),
+    })),
+  gitTagDelete: (scope: SessionScope, name: string) =>
+    call<{ ok: true }>('git.tag-delete', scopePayload(scope, { name })),
+  gitTagPush: (scope: SessionScope, name: string) =>
+    call<{ ok: true }>('git.tag-push', scopePayload(scope, { name })),
   gitCommit: (scope: SessionScope, message: string) =>
     call<{ ok: true }>('git.commit', scopePayload(scope, { message })),
   gitFetch: (scope: SessionScope, all = false) =>

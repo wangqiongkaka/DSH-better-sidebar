@@ -62,6 +62,13 @@ export interface GitStashEntry {
   message: string
 }
 
+export interface GitTagEntry {
+  /** Tag name, e.g. 'v1.2.0'. */
+  name: string
+  /** Annotation subject for an annotated tag; the tagged commit's subject for a lightweight one. */
+  subject: string
+}
+
 /** One git failure (stderr text as the message). */
 export class GitCommandError extends Error {
   constructor(
@@ -410,4 +417,43 @@ export async function revert(cwd: string, hash: string): Promise<void> {
 /** Cherry-pick one commit onto the current branch. */
 export async function cherryPick(cwd: string, hash: string): Promise<void> {
   await runGit(cwd, ['cherry-pick', hash])
+}
+
+/**
+ * Every tag, newest-created first. `for-each-ref` has no `-z`, so the rows are
+ * newline-separated — safe here because neither a ref name nor
+ * `%(contents:subject)` can contain a newline. A lightweight tag has no
+ * annotation, so git falls back to the tagged commit's subject.
+ */
+export async function tags(cwd: string): Promise<GitTagEntry[]> {
+  const raw = await runGit(cwd, [
+    'for-each-ref', '--sort=-creatordate', '--format=%(refname:short)%1f%(contents:subject)', 'refs/tags',
+  ])
+  return raw.split('\n').filter(row => row !== '').map((row) => {
+    const [name, subject] = row.split('\x1f')
+    return { name: name ?? '', subject: subject ?? '' }
+  })
+}
+
+/** Create a tag on `commit` (HEAD when omitted); a non-empty message makes it annotated. */
+export async function createTag(cwd: string, name: string, message?: string, commit?: string): Promise<void> {
+  const annotate = message !== undefined && message !== '' ? ['-a', '-m', message] : []
+  await runGit(cwd, ['tag', ...annotate, name, ...(commit === undefined ? [] : [commit])])
+}
+
+/** Delete a local tag (the remote copy, if any, is untouched). */
+export async function deleteTag(cwd: string, name: string): Promise<void> {
+  await runGit(cwd, ['tag', '-d', name])
+}
+
+/**
+ * Push one tag. `origin` is the near-universal name, but a repository whose
+ * single remote is called something else should still work, so fall back to
+ * the first configured remote rather than failing on a hard-coded name.
+ */
+export async function pushTag(cwd: string, name: string): Promise<void> {
+  const names = (await runGit(cwd, ['remote'])).split('\n').filter(line => line !== '')
+  const remote = names.includes('origin') ? 'origin' : names[0]
+  if (remote === undefined) throw new GitCommandError('no remote configured', 'git-error', 'push tag')
+  await runGit(cwd, ['push', remote, `refs/tags/${name}`], 120_000)
 }

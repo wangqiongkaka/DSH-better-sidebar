@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { api, type GitStashEntry, type GitStatusResult } from '../src/client/api.ts'
+import { api, type GitLogEntry, type GitStashEntry, type GitStatusResult, type GitTagEntry } from '../src/client/api.ts'
 import { GitView } from '../src/client/GitView.tsx'
 
 ;(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true
@@ -23,6 +23,20 @@ const stashStack: GitStashEntry[] = [
   { ref: 'stash@{0}', message: 'WIP on main: 1a2b3c4 newest' },
   { ref: 'stash@{1}', message: 'WIP on main: 5d6e7f8 older' },
 ]
+
+const tagList: GitTagEntry[] = [
+  { name: 'v0.2.0', subject: 'second release' },
+  { name: 'v0.1.0', subject: 'base commit' },
+]
+
+const logEntry: GitLogEntry = {
+  hash: '1a2b3c4',
+  hashFull: '1a2b3c4d5e6f70819a2b3c4d5e6f70819a2b3c4d',
+  subject: 'older commit',
+  author: 'Alice',
+  date: '2024-01-01 10:00:00 +0800',
+  refs: '',
+}
 
 const flush = async (): Promise<void> => {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
@@ -59,6 +73,10 @@ beforeEach(() => {
   vi.spyOn(api, 'gitStashList').mockResolvedValue({ entries: stashStack })
   vi.spyOn(api, 'gitStash').mockResolvedValue({ ok: true })
   vi.spyOn(api, 'gitStashPop').mockResolvedValue({ ok: true })
+  vi.spyOn(api, 'gitTags').mockResolvedValue({ entries: tagList })
+  vi.spyOn(api, 'gitTagCreate').mockResolvedValue({ ok: true })
+  vi.spyOn(api, 'gitTagDelete').mockResolvedValue({ ok: true })
+  vi.spyOn(api, 'gitTagPush').mockResolvedValue({ ok: true })
 })
 
 afterEach(() => {
@@ -77,8 +95,9 @@ describe('GitView change groups', () => {
         'git-unstaged-changes',
         'git-untracked-changes',
         'git-stash-entries',
+        'git-tag-entries',
       ])
-      expect(toggles.map(button => button.getAttribute('aria-expanded'))).toEqual(['true', 'true', 'true', 'true'])
+      expect(toggles.map(button => button.getAttribute('aria-expanded'))).toEqual(['true', 'true', 'true', 'true', 'true'])
       expect(container.textContent).toContain('staged.ts')
       expect(container.textContent).toContain('unstaged.ts')
       expect(container.textContent).toContain('new.ts')
@@ -253,6 +272,150 @@ describe('GitView stash errors', () => {
       await act(async () => { stashSaveButton().click(); await Promise.resolve() })
       await flush()
       expect(container.textContent).not.toContain('pop conflicted')
+    } finally {
+      act(() => { root.unmount() })
+      container.remove()
+    }
+  })
+})
+
+/** A button by either locale's label (the suite runs under whichever is active). */
+function labelledButton(en: string, zh: string): HTMLButtonElement {
+  return [...document.querySelectorAll<HTMLButtonElement>('button')]
+    .find(button => button.textContent?.trim() === en || button.textContent?.trim() === zh)!
+}
+
+/** The tag section element (the block that owns the tag list). */
+function tagSection(container: HTMLElement): HTMLElement {
+  return container.querySelector<HTMLElement>('#git-tag-entries')!.parentElement!
+}
+
+function tagInput(placeholderPart: string): HTMLInputElement {
+  return [...document.querySelectorAll<HTMLInputElement>('input')]
+    .find(input => input.placeholder.includes(placeholderPart))!
+}
+
+/** Type into a controlled React input (the value setter is on the prototype). */
+function typeInto(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+  act(() => {
+    setter.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
+describe('GitView tags', () => {
+  it('lists tags newest first with their count and subject', async () => {
+    const { container, root } = renderGitView()
+    try {
+      await flush()
+      expect(container.textContent).toContain('Tag (2)')
+      const rows = [...container.querySelectorAll('#git-tag-entries button')].map(node => node.textContent ?? '')
+      expect(rows[0]).toContain('v0.2.0')
+      expect(rows[0]).toContain('second release')
+      expect(rows[1]).toContain('v0.1.0')
+    } finally {
+      act(() => { root.unmount() })
+      container.remove()
+    }
+  })
+
+  // WHY: the message field is what decides lightweight vs annotated. An empty
+  // message must reach the host as "no message", not as an empty annotation.
+  it('creates a lightweight tag on HEAD from the section header', async () => {
+    const { container, root } = renderGitView()
+    try {
+      await flush()
+      act(() => { labelledButton('New tag', '新建 Tag').click() })
+      const create = labelledButton('Create', '创建')
+      expect(create.disabled).toBe(true)
+
+      typeInto(tagInput('v1.2.0'), 'v1.0.0')
+      await act(async () => { labelledButton('Create', '创建').click(); await Promise.resolve() })
+      await flush()
+
+      expect(api.gitTagCreate).toHaveBeenCalledWith({ sessionId: 'session-1', cwd: '/repo' }, 'v1.0.0', '', undefined)
+      expect(api.gitTags).toHaveBeenCalledTimes(2)
+      expect(tagInput('v1.2.0')).toBeUndefined()
+    } finally {
+      act(() => { root.unmount() })
+      container.remove()
+    }
+  })
+
+  // WHY: the whole point of the history entry is tagging a commit that is not
+  // HEAD; losing the hash would silently tag the latest commit instead.
+  it('creates an annotated tag on the right-clicked commit', async () => {
+    vi.mocked(api.gitLog).mockResolvedValue([logEntry])
+    const { container, root } = renderGitView()
+    try {
+      await flush()
+      const row = container.querySelector<HTMLElement>('[class*="gitLogRow"]')!
+      act(() => { row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })) })
+      const entry = menuItem('Create tag here') ?? menuItem('在此提交创建 Tag')
+      expect(entry).toBeDefined()
+      act(() => { entry!.click() })
+      expect(document.body.textContent).toContain('1a2b3c4')
+      expect(document.body.textContent).toContain('older commit')
+
+      typeInto(tagInput('v1.2.0'), 'v1.0.0')
+      typeInto(tagInput('optional') ?? tagInput('选填'), 'release notes')
+      await act(async () => { labelledButton('Create', '创建').click(); await Promise.resolve() })
+      await flush()
+
+      expect(api.gitTagCreate).toHaveBeenCalledWith(
+        { sessionId: 'session-1', cwd: '/repo' }, 'v1.0.0', 'release notes', logEntry.hashFull,
+      )
+    } finally {
+      act(() => { root.unmount() })
+      container.remove()
+    }
+  })
+
+  // WHY: a rejected name is the common case (git's ref rules are strict), and
+  // closing the dialog would throw away the message the user just wrote.
+  it('keeps the create dialog open and its input intact when the host rejects the name', async () => {
+    vi.mocked(api.gitTagCreate).mockRejectedValueOnce(new Error('invalid tag name'))
+    const { container, root } = renderGitView()
+    try {
+      await flush()
+      act(() => { labelledButton('New tag', '新建 Tag').click() })
+      typeInto(tagInput('v1.2.0'), 'bad name')
+      await act(async () => { labelledButton('Create', '创建').click(); await Promise.resolve() })
+      await flush()
+
+      expect(document.body.textContent).toContain('invalid tag name')
+      expect(tagInput('v1.2.0').value).toBe('bad name')
+    } finally {
+      act(() => { root.unmount() })
+      container.remove()
+    }
+  })
+
+  // WHY: a tag error belongs next to the tag section; by the commit box it
+  // reads as a commit failure, exactly the mistake the stash section fixed.
+  it('reports a failed push inside the tag section after confirming', async () => {
+    vi.mocked(api.gitTagPush).mockRejectedValueOnce(new Error('remote rejected'))
+    const { container, root } = renderGitView()
+    try {
+      await flush()
+      const row = container.querySelector<HTMLButtonElement>('#git-tag-entries button')!
+      await act(async () => { row.click(); await Promise.resolve() })
+      const push = menuItem('Push to remote') ?? menuItem('推送到远端')
+      expect(push).toBeDefined()
+      act(() => { push!.click() })
+      // The confirm modal repeats the action label; the last one is its button.
+      const confirm = [...document.querySelectorAll<HTMLButtonElement>('button')]
+        .filter(button => button.textContent?.trim() === 'Push to remote' || button.textContent?.trim() === '推送到远端')
+        .at(-1)!
+      await act(async () => { confirm.click(); await Promise.resolve() })
+      await flush()
+
+      expect(api.gitTagPush).toHaveBeenCalledWith({ sessionId: 'session-1', cwd: '/repo' }, 'v0.2.0')
+      const shown = [...container.querySelectorAll('[class*="gitError"]')]
+        .filter(node => node.textContent?.includes('remote rejected'))
+      expect(shown).toHaveLength(1)
+      expect(tagSection(container).contains(shown[0]!)).toBe(true)
     } finally {
       act(() => { root.unmount() })
       container.remove()

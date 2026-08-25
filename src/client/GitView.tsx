@@ -14,7 +14,7 @@ import {
   Button, IconBranchOutline16, IconChevronRightOutline14, IconCodeOutline16, IconCopyOutline16, IconRefreshOutline16,
   IconTrashOutline16, Input, Menu, Modal, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { GitLogEntry, GitOperation, GitStashEntry, GitStatusEntry, GitStatusResult, GitWorktree, SessionScope } from './api.ts'
+import type { GitLogEntry, GitOperation, GitStashEntry, GitStatusEntry, GitStatusResult, GitTagEntry, GitWorktree, SessionScope } from './api.ts'
 import { api } from './api.ts'
 import { relativeTo } from './paths.ts'
 import { relativeTime, t } from './locales.ts'
@@ -107,6 +107,7 @@ export function GitView(props: {
   const [branchNames, setBranchNames] = useState<string[]>([])
   const [logEntries, setLogEntries] = useState<GitLogEntry[]>([])
   const [stashEntries, setStashEntries] = useState<GitStashEntry[]>([])
+  const [tagEntries, setTagEntries] = useState<GitTagEntry[]>([])
   const [commitMsg, setCommitMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [commitError, setCommitError] = useState<string | null>(null)
@@ -137,18 +138,26 @@ export function GitView(props: {
   const [stashMenu, setStashMenu] = useState<{ entry: GitStashEntry; x: number; y: number } | null>(null)
   /** The last failed stash operation, shown inside the stash section itself. */
   const [stashError, setStashError] = useState<string | null>(null)
+  /** The open tag-row context menu. */
+  const [tagMenu, setTagMenu] = useState<{ entry: GitTagEntry; x: number; y: number } | null>(null)
+  /** The last failed tag operation, shown inside the tag section itself. */
+  const [tagError, setTagError] = useState<string | null>(null)
+  /** The open create-tag draft; `commit` null means HEAD. */
+  const [tagDraft, setTagDraft] = useState<{ commit: GitLogEntry | null; name: string; message: string } | null>(null)
+  /** A failed create, shown inside the create dialog so the input survives a retry. */
+  const [tagDraftError, setTagDraftError] = useState<string | null>(null)
   /** The open history-row context menu. */
   const [historyMenu, setHistoryMenu] = useState<{ entry: GitLogEntry; x: number; y: number } | null>(null)
   /** The pending destructive action awaiting confirmation. */
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
   /** Change-group folding is intentionally local to this mounted Git view. */
-  const [expandedSections, setExpandedSections] = useState({ staged: true, unstaged: true, untracked: true, stash: true })
+  const [expandedSections, setExpandedSections] = useState({ staged: true, unstaged: true, untracked: true, stash: true, tag: true })
 
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true)
     setError(null)
     try {
-      const [statusResult, branchResult, logResult, worktreeResult, operationResult, stashResult] = await Promise.all([
+      const [statusResult, branchResult, logResult, worktreeResult, operationResult, stashResult, tagResult] = await Promise.all([
         api.gitStatus(scope),
         api.gitBranch(scope).catch(() => ({ current: '', names: [] as string[] })),
         // The first history page only; the rest arrives via "load more".
@@ -156,6 +165,7 @@ export function GitView(props: {
         api.gitWorktrees(scope).catch(() => ({ entries: [] as GitWorktree[], pathPrefix: '' })),
         api.gitOperation(scope).catch(() => ({ operation: null })),
         api.gitStashList(scope).catch(() => ({ entries: [] as GitStashEntry[] })),
+        api.gitTags(scope).catch(() => ({ entries: [] as GitTagEntry[] })),
       ])
       setStatus(statusResult)
       setBranchNames(branchResult.names)
@@ -165,6 +175,7 @@ export function GitView(props: {
       setWorktreePathPrefix(worktreeResult.pathPrefix)
       setOperation(operationResult.operation)
       setStashEntries(stashResult.entries)
+      setTagEntries(tagResult.entries)
       const available = branchResult.names.filter(name => !worktreeResult.entries.some(entry => entry.branch === name))
       setWorktreeBranch(branch => available.includes(branch) ? branch : available[0] ?? '')
       setWorktreeBase(base => branchResult.names.includes(base) ? base : branchResult.current)
@@ -258,6 +269,39 @@ export function GitView(props: {
       await refresh()
     } catch (reason) {
       setStashError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Run one tag operation, then refresh; failures surface inside the tag section. */
+  const runTagAction = async (action: () => Promise<unknown>): Promise<void> => {
+    setBusy(true)
+    setTagError(null)
+    try {
+      await action()
+      await refresh()
+    } catch (reason) {
+      setTagError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Create the drafted tag. The dialog stays open on failure so a rejected
+   *  name can be corrected without retyping the message. */
+  const createTag = async (): Promise<void> => {
+    const draft = tagDraft
+    if (draft === null || draft.name.trim() === '' || busy) return
+    setBusy(true)
+    setTagDraftError(null)
+    setTagError(null)
+    try {
+      await api.gitTagCreate(scope, draft.name.trim(), draft.message.trim(), draft.commit?.hashFull)
+      setTagDraft(null)
+      await refresh()
+    } catch (reason) {
+      setTagDraftError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setBusy(false)
     }
@@ -435,6 +479,13 @@ export function GitView(props: {
     event.preventDefault()
     event.stopPropagation()
     setStashMenu({ entry, x: event.clientX, y: event.clientY })
+  }
+
+  /** The tag-row menu opens on left OR right click, for the same reason as the stash row. */
+  const openTagMenu = (event: MouseEvent, entry: GitTagEntry): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    setTagMenu({ entry, x: event.clientX, y: event.clientY })
   }
 
   const openHistoryMenu = (event: MouseEvent, entry: GitLogEntry): void => {
@@ -686,6 +737,43 @@ export function GitView(props: {
             )}
           </div>
 
+          <div className={css.gitSection}>
+            <div className={css.gitSectionHeader}>
+              <button type="button" className={css.gitSectionToggle} aria-expanded={expandedSections.tag} aria-controls="git-tag-entries" onClick={() => { toggleSection('tag') }}>
+                <IconChevronRightOutline14 className={expandedSections.tag ? css.gitSectionChevronExpanded : css.gitSectionChevron} />
+                <span>{t('tag')} ({tagEntries.length})</span>
+              </button>
+              <button
+                type="button"
+                className={css.gitLink}
+                disabled={busy}
+                onClick={() => { setTagDraftError(null); setTagDraft({ commit: null, name: '', message: '' }) }}
+              >
+                {t('tagNew')}
+              </button>
+            </div>
+            {tagError !== null && <div className={css.gitError}>{tagError}</div>}
+            {expandedSections.tag && (
+              <div id="git-tag-entries">
+                {tagEntries.length === 0 && <div className={css.gitEmpty}>{t('noChanges')}</div>}
+                {tagEntries.map(entry => (
+                  <div key={entry.name} className={css.gitRow}>
+                    <button
+                      type="button"
+                      className={css.gitRowMain}
+                      title={`${entry.name}  ${entry.subject}`}
+                      onClick={(event) => { openTagMenu(event, entry) }}
+                      onContextMenu={(event) => { openTagMenu(event, entry) }}
+                    >
+                      <span className={css.gitLogHash}>{entry.name}</span>
+                      <span className={css.gitName}>{entry.subject}</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className={css.gitCommit}>
             <Input
               className={css.gitCommitInput}
@@ -839,6 +927,48 @@ export function GitView(props: {
             anchor={<span />}
           />
 
+          {/* The shared tag-row context menu. */}
+          <Menu
+            open={tagMenu !== null}
+            onClose={() => { setTagMenu(null) }}
+            items={[
+              { id: 'push', label: t('tagPush') },
+              { id: 'copy', label: t('tagCopyName'), icon: <IconCopyOutline16 size={14} /> },
+              { type: 'separator', id: 'tag-separator' },
+              { id: 'delete', label: t('tagDelete'), icon: <IconTrashOutline16 size={14} />, danger: true },
+            ]}
+            onSelect={(id) => {
+              const target = tagMenu
+              if (target === null) return
+              setTagMenu(null)
+              if (id === 'copy') {
+                copy(target.entry.name)
+                return
+              }
+              if (id === 'push') {
+                runConfirmed({
+                  title: t('tagPushTitle'),
+                  description: t('tagPushDesc', { name: target.entry.name }),
+                  confirmLabel: t('tagPush'),
+                  onConfirm: () => api.gitTagPush(scope, target.entry.name),
+                }, setTagError)
+                return
+              }
+              if (id === 'delete') {
+                runConfirmed({
+                  title: t('tagDeleteTitle'),
+                  description: t('tagDeleteDesc', { name: target.entry.name }),
+                  confirmLabel: t('tagDelete'),
+                  onConfirm: () => api.gitTagDelete(scope, target.entry.name),
+                }, setTagError)
+              }
+            }}
+            portal
+            align="start"
+            getAnchorRect={() => (tagMenu === null ? null : new DOMRect(tagMenu.x, tagMenu.y, 0, 0))}
+            anchor={<span />}
+          />
+
           {/* The shared history-row context menu. */}
           <Menu
             open={historyMenu !== null}
@@ -848,6 +978,7 @@ export function GitView(props: {
               { id: 'copyShort', label: t('copyShortHash'), icon: <IconCopyOutline16 size={14} /> },
               { id: 'copyFull', label: t('copyFullHash'), icon: <IconCopyOutline16 size={14} /> },
               { id: 'copySubject', label: t('copySubject'), icon: <IconCopyOutline16 size={14} /> },
+              { id: 'tag', label: t('tagCreateHere') },
               { type: 'separator', id: 'sep2' },
               { id: 'revert', label: t('revertCommit'), danger: true },
               { id: 'cherryPick', label: t('cherryPickCommit'), danger: true },
@@ -870,6 +1001,11 @@ export function GitView(props: {
               }
               if (id === 'copySubject') {
                 copy(target.entry.subject)
+                return
+              }
+              if (id === 'tag') {
+                setTagDraftError(null)
+                setTagDraft({ commit: target.entry, name: '', message: '' })
                 return
               }
               if (id === 'revert') {
@@ -924,6 +1060,44 @@ export function GitView(props: {
           </Modal>
         </>
       )}
+
+      <Modal
+        open={tagDraft !== null}
+        onClose={() => { setTagDraft(null) }}
+        title={t('tagCreateTitle')}
+        closeLabel={t('cancel')}
+        footer={(
+          <>
+            <Button variant="outline" onClick={() => { setTagDraft(null) }}>{t('cancel')}</Button>
+            <Button
+              variant="primary"
+              disabled={busy || (tagDraft?.name.trim() ?? '') === ''}
+              onClick={() => { void createTag() }}
+            >
+              {t('tagCreate')}
+            </Button>
+          </>
+        )}
+      >
+        <p className={css.gitConfirmDesc}>
+          {tagDraft?.commit == null
+            ? t('tagAtHead')
+            : t('tagAtCommit', { hash: tagDraft.commit.hash, subject: tagDraft.commit.subject })}
+        </p>
+        <Input
+          placeholder={t('tagNamePlaceholder')}
+          value={tagDraft?.name ?? ''}
+          disabled={busy}
+          onChange={(event) => { setTagDraft(draft => draft === null ? draft : { ...draft, name: event.target.value }); setTagDraftError(null) }}
+        />
+        <Input
+          placeholder={t('tagMessagePlaceholder')}
+          value={tagDraft?.message ?? ''}
+          disabled={busy}
+          onChange={(event) => { setTagDraft(draft => draft === null ? draft : { ...draft, message: event.target.value }); setTagDraftError(null) }}
+        />
+        {tagDraftError !== null && <div className={css.gitError}>{tagDraftError}</div>}
+      </Modal>
 
       <Modal
         open={mergeSource !== null}
